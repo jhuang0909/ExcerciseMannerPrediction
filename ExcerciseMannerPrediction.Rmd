@@ -1,0 +1,118 @@
+---
+title: "ExerciseMannerPrediction"
+author: "JHuang"
+date: "February 11, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/jhuang/Documents/Coursera/CourseProjects/PracticalMachineLearning")
+libs <- c('dplyr', 'ggplot2', 'caret', 'stringr', 'reshape2', 'rstudioapi', 'rattle', 'rpart.plot')
+
+for (i in libs){
+        if( !is.element(i, .packages(all.available = TRUE)) ) {
+                install.packages(i)
+        }
+        library(i,character.only = TRUE)
+}
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which people did the exercise. 
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. In this study, researchers first defined quality of execution and investigate three aspects that pertain to qualitative activity recognition: the problem of specifying correct execution, the automatic and robust detection of execution mistakes, and how to provide feedback on the quality of execution to the user. 
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg).  In the dataset, the "classe" variable represents the excercise manner.
+
+## Data Loading
+
+First we load data from the online sources, including both training data and test data.  
+
+```{r load data}
+if(!file.exists("./data")){dir.create("./data")}
+
+trainingDataUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(trainingDataUrl, destfile = "./data/pml-training.csv")
+pml_training <- read.csv("./data/pml-training.csv")
+
+testingDataUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(testingDataUrl, destfile = "./data/pml-testing.csv")
+pml_testing <- read.csv("./data/pml-testing.csv")
+```
+
+## Data Preprocessing
+
+Before fitting the data into any model, we may need to inspect the data set and remove variables not useful as a predictor. In the original training data, there could be some variables having very small variabilty or not changing at all.  We can use nearZeroVar method to identify those variables.  Then we should also remove columns containing too many NAs.  Finally, there are some test-related records, which are not legitimate covariates. 
+
+```{r data preprocessing}
+
+dim(pml_training)
+
+# Remove zero covariates
+zeroVar <- nearZeroVar(pml_training,saveMetrics=TRUE)
+
+# Remove columns having too many NAs
+NAThreshold <- 0.9
+toomanyNA <- colSums(is.na(pml_training)) > NAThreshold * nrow(pml_training)
+
+# Also the first 5 columns are test-related records instead of test measurements
+pml_training <- pml_training[,!(zeroVar$nzv | toomanyNA) ][,-(1:5)]
+
+pml_training$classe<-as.factor(pml_training$classe)
+
+dim(pml_training)
+
+```
+
+## Model Prediction
+
+To estimate the expected out-of-sample error, the original training set is randomly splitted into two parts.
+```{r data splitting}
+
+set.seed(217)
+inTrain <- createDataPartition(y=pml_training$classe,p=0.75, list=FALSE)
+training <- pml_training[inTrain,]
+testing <- pml_training[-inTrain,]
+
+```
+
+Since we have a categorical outcome, we can use decision tree and random forest to fit the data.
+
+### Decision Tree
+
+```{r decision tree}
+
+treeFit <- train(classe ~ .,method="rpart",data=training)
+print(treeFit$finalModel)
+fancyRpartPlot(treeFit$finalModel)
+
+treePred <- predict(treeFit,newdata=testing)
+confusionMatrix(testing$classe, treePred)
+
+```
+
+### Random Forest
+
+```{r random forest}
+
+rfFit <-train(classe~.,data=training, method="rf", trControl=trainControl(method="cv", number=3), verbose=FALSE)
+rfFit
+
+rfPred <- predict(rfFit,testing)
+confusionMatrix(testing$classe, rfPred)
+
+```
+
+From the confusion matrix shown above, the model built from random forest uses 27 variables and has an accuracy of 0.9984, while the model from decision tree shows an accuracy of 0.4882.  Therefore, the random forest model should be used in predict the original test data set.
+
+## Predicting Test Set
+
+```{r predict test set}
+
+predict(rfFit,pml_testing)
+
+```
